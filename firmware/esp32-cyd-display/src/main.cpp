@@ -31,15 +31,14 @@ static bool g_ws_connected = false;
 // ── JSON parse ───────────────────────────────────────────────────────────
 
 static void parse_frame(const char *payload, size_t len) {
-    // Use a fixed-capacity doc — CYD has ~200KB usable SRAM
-    StaticJsonDocument<2048> doc;
+    JsonDocument doc;
     DeserializationError err = deserializeJson(doc, payload, len);
     if (err) return;
 
     const char *type = doc["type"] | "";
 
     if (strcmp(type, "csi_frame") == 0 || strcmp(type, "csi_update") == 0
-            || doc.containsKey("amplitudes")) {
+            || !doc["amplitudes"].isNull()) {
         CsiFrame f = {};
         f.node_id  = doc["node_id"]  | 0;
         f.rssi     = doc["rssi"]     | 0;
