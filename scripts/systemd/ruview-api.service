@@ -1,0 +1,37 @@
+[Unit]
+Description=RuView Python FastAPI Server
+Documentation=https://github.com/ruvnet/wifi-densepose
+After=network-online.target ruview-sensing.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=andrew
+Group=andrew
+WorkingDirectory=/home/andrew/repos/ruview
+
+ExecStartPre=/bin/test -x /home/andrew/repos/ruview/.venv/bin/uvicorn
+ExecStartPre=/bin/test -f /home/andrew/repos/ruview/.env
+
+ExecStart=/home/andrew/repos/ruview/.venv/bin/uvicorn \
+    v1.src.api.main:app \
+    --host 0.0.0.0 \
+    --port 8000 \
+    --workers 2
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ruview-api
+
+EnvironmentFile=/home/andrew/repos/ruview/.env
+Environment=PYTHONUNBUFFERED=1
+
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=/home/andrew/repos/ruview/data
+
+[Install]
+WantedBy=multi-user.target

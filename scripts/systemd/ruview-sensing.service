@@ -1,0 +1,44 @@
+[Unit]
+Description=RuView WiFi CSI Sensing Server
+Documentation=https://github.com/ruvnet/wifi-densepose
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=andrew
+Group=andrew
+WorkingDirectory=/home/andrew/repos/ruview
+
+# Confirm binary exists before starting
+ExecStartPre=/bin/test -x /home/andrew/repos/ruview/rust-port/wifi-densepose-rs/target/release/sensing-server
+
+ExecStart=/home/andrew/repos/ruview/rust-port/wifi-densepose-rs/target/release/sensing-server \
+    --source auto \
+    --tick-ms 100 \
+    --ui-path /home/andrew/repos/ruview/ui \
+    --http-port 3000 \
+    --ws-port 3001
+
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=ruview-sensing
+
+# CSI_SOURCE: auto = probe UDP:5005 for ESP32, fall back to simulation
+# Override: systemctl set-environment CSI_SOURCE=esp32
+Environment=RUST_LOG=info
+Environment=CSI_SOURCE=auto
+
+# Allow binding to UDP port 5005 (>1024 so no cap needed)
+# AmbientCapabilities= (none required)
+
+# Harden service
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=read-only
+ReadWritePaths=/home/andrew/repos/ruview/data
+
+[Install]
+WantedBy=multi-user.target
