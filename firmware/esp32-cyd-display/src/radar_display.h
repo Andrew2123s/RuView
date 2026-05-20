@@ -1,33 +1,27 @@
 #pragma once
 #include <stdint.h>
-#include <stddef.h>
+#include <stdbool.h>
+
+#define NUM_SUBCARRIERS 56
 
 struct CsiFrame {
-    int     node_id;
-    int     rssi;
-    int     channel;
-    bool    presence;
-    float   amplitudes[64];   // up to 64 subcarriers; num_subcarriers gives actual count
-    int     num_subcarriers;
-    float   heart_rate;
-    float   breathing_rate;
-    bool    has_vitals;
+    uint8_t  node_id;
+    float    rssi;           // dBm (float from server)
+    uint8_t  channel;
+    bool     presence;
+    float    amplitudes[NUM_SUBCARRIERS];
+    uint8_t  num_subcarriers;
+    float    heart_rate;     // BPM, -1 if unknown
+    float    breathing_rate; // BPM, -1 if unknown
+    bool     has_vitals;
+    float    confidence;     // 0..1 from classification
+    uint8_t  persons_count;  // estimated_persons or derived from presence
+    float    motion_score;   // 0..1 normalised
     uint32_t frame_count;
 };
 
-// Must be called once before any draw function.
 void display_init();
-
-// Full-screen "connecting…" splash while WiFi / WS connects.
 void display_connecting(const char *msg);
-
-// Draw error message centered on screen.
 void display_error(const char *msg);
-
-// Update all three display zones from a received frame.
-// Call after each WebSocket message parse.
 void display_frame(const CsiFrame &f, uint32_t fps);
-
-// Advance the sweep line by SWEEP_STEP_PX and redraw it.
-// Call from the main loop independently of frame arrival.
-void display_tick_sweep();
+void display_tick_animate();

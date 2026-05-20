@@ -25,7 +25,7 @@ static uint32_t g_fps_last_ms = 0;
 static uint32_t g_fps_frames_this_sec = 0;
 static uint32_t g_fps = 0;
 static uint32_t g_last_display_ms = 0;
-static uint32_t g_last_sweep_ms = 0;
+static uint32_t g_last_animate_ms = 0;
 static bool g_ws_connected = false;
 
 // ── JSON parse ───────────────────────────────────────────────────────────
@@ -36,54 +36,58 @@ static void parse_frame(const char *payload, size_t len) {
     if (err) return;
 
     const char *type = doc["type"] | "";
+    if (strcmp(type, "sensing_update") != 0) return;
 
-    if (strcmp(type, "csi_frame") == 0 || strcmp(type, "csi_update") == 0
-            || !doc["amplitudes"].isNull()) {
-        CsiFrame f = {};
-        f.node_id  = doc["node_id"]  | 0;
-        f.rssi     = doc["rssi"]     | 0;
-        f.channel  = doc["channel"]  | 6;
-        f.presence = doc["presence"] | false;
+    CsiFrame f = {};
 
-        JsonArrayConst amps = doc["amplitudes"].as<JsonArrayConst>();
-        f.num_subcarriers = 0;
-        for (JsonVariantConst v : amps) {
-            if (f.num_subcarriers >= NUM_SUBCARRIERS) break;
-            f.amplitudes[f.num_subcarriers++] = v.as<float>();
-        }
+    // Node 0 — RSSI and amplitudes
+    JsonObjectConst node0 = doc["nodes"][0];
+    f.node_id = node0["node_id"] | 0;
+    f.rssi    = node0["rssi_dbm"] | -100.0f;
+    f.channel = 6;
 
-        // Vitals (may be embedded or absent)
-        float hr = doc["heart_rate"] | doc["hr"] | -1.0f;
-        float br = doc["breathing_rate"] | doc["br"] | -1.0f;
-        if (hr > 0 && br >= 0) {
-            f.heart_rate = hr;
+    JsonArrayConst amps = node0["amplitude"].as<JsonArrayConst>();
+    f.num_subcarriers = 0;
+    for (JsonVariantConst v : amps) {
+        if (f.num_subcarriers >= NUM_SUBCARRIERS) break;
+        f.amplitudes[f.num_subcarriers++] = v.as<float>();
+    }
+
+    // Classification
+    f.presence   = doc["classification"]["presence"] | false;
+    f.confidence = doc["classification"]["confidence"] | 0.0f;
+
+    // Vital signs (optional field)
+    JsonObjectConst vs = doc["vital_signs"];
+    if (!vs.isNull()) {
+        float hr = vs["heart_rate_bpm"] | -1.0f;
+        float br = vs["breathing_rate_bpm"] | -1.0f;
+        if (hr > 0.0f && br > 0.0f) {
+            f.heart_rate     = hr;
             f.breathing_rate = br;
-            f.has_vitals = true;
-        }
-
-        f.frame_count = ++g_frame_count;
-        g_fps_frames_this_sec++;
-
-        // Update FPS counter every second
-        uint32_t now = millis();
-        if (now - g_fps_last_ms >= 1000) {
-            g_fps = g_fps_frames_this_sec;
-            g_fps_frames_this_sec = 0;
-            g_fps_last_ms = now;
-        }
-
-        // Atomic-ish copy (single-core task in main loop handles display)
-        memcpy(&g_frame, &f, sizeof(f));
-        g_frame_ready = true;
-    } else if (strcmp(type, "vitals") == 0) {
-        float hr = doc["heart_rate"] | -1.0f;
-        float br = doc["breathing_rate"] | -1.0f;
-        if (hr > 0) {
-            g_frame.heart_rate    = hr;
-            g_frame.breathing_rate = br;
-            g_frame.has_vitals    = true;
+            f.has_vitals     = true;
         }
     }
+
+    // Multi-person count
+    f.persons_count = (uint8_t)(doc["estimated_persons"] | 0);
+
+    // Motion score from feature variance, clamped to [0, 1]
+    float var = doc["features"]["variance"] | 0.0f;
+    f.motion_score = var < 1.0f ? var : 1.0f;
+
+    f.frame_count = ++g_frame_count;
+    g_fps_frames_this_sec++;
+
+    uint32_t now = millis();
+    if (now - g_fps_last_ms >= 1000) {
+        g_fps = g_fps_frames_this_sec;
+        g_fps_frames_this_sec = 0;
+        g_fps_last_ms = now;
+    }
+
+    memcpy(&g_frame, &f, sizeof(f));
+    g_frame_ready = true;
 }
 
 // ── WebSocket callback ───────────────────────────────────────────────────
@@ -97,8 +101,6 @@ static void on_ws_event(WStype_t type, uint8_t *payload, size_t len) {
 
         case WStype_CONNECTED:
             g_ws_connected = true;
-            // Request the sensing-server to start streaming (if it requires a subscribe msg)
-            ws.sendTXT("{\"type\":\"subscribe\",\"topic\":\"csi\"}");
             break;
 
         case WStype_TEXT:
@@ -169,10 +171,10 @@ void loop() {
         g_last_display_ms = now;
     }
 
-    // Advance sweep line regardless of new frames
-    if (g_ws_connected && (now - g_last_sweep_ms >= DISPLAY_REFRESH_MS)) {
-        display_tick_sweep();
-        g_last_sweep_ms = now;
+    // Advance breathing animation regardless of new frames
+    if (g_ws_connected && (now - g_last_animate_ms >= DISPLAY_REFRESH_MS)) {
+        display_tick_animate();
+        g_last_animate_ms = now;
     }
 
     // Show reconnecting message if WS not up
